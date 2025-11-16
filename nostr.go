@@ -5,13 +5,16 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -36,11 +39,13 @@ func main() {
 
 	command := os.Args[1]
 
-	switch {
-	case command == "--setup":
+	switch command {
+	case "--setup":
 		runSetup()
-	case command == "--help":
+	case "--help":
 		printUsage()
+	case "article":
+		runArticleCommand(os.Args[2:])
 	default:
 		runPublish(command)
 	}
@@ -50,7 +55,24 @@ func printUsage() {
 	fmt.Println("Usage:")
 	fmt.Println("  nostr --setup                  # Setup your Nostr private key")
 	fmt.Println("  nostr --help                   # Show this help message")
+	fmt.Println("  nostr article post <file>      # Publish a long-form article")
 	fmt.Println("  nostr \"your message here\"      # Publish a note to Nostr")
+}
+
+func runArticleCommand(args []string) {
+	if len(args) == 0 {
+		fmt.Println("Usage: nostr article post <file>")
+		return
+	}
+
+	subcommand := args[0]
+
+	switch subcommand {
+	case "post":
+		runArticlePost(args[1:])
+	default:
+		fmt.Printf("Unknown article command: %s\n", subcommand)
+	}
 }
 
 func getConfigPath() string {
@@ -59,6 +81,61 @@ func getConfigPath() string {
 		panic(err)
 	}
 	return filepath.Join(homeDir, ".config", "nostr", "config.json")
+}
+
+func loadConfig() (*Config, error) {
+	configPath := getConfigPath()
+	configData, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("error reading config: %w", err)
+	}
+
+	var config Config
+	if err := json.Unmarshal(configData, &config); err != nil {
+		return nil, fmt.Errorf("error parsing config: %w", err)
+	}
+
+	return &config, nil
+}
+
+func decryptPrivateKeyFromConfig(config *Config) (string, error) {
+	password, err := readPassword("Enter password to decrypt private key: ")
+	if err != nil {
+		return "", fmt.Errorf("error reading password: %w", err)
+	}
+
+	salt, err := hex.DecodeString(config.Salt)
+	if err != nil {
+		return "", fmt.Errorf("error decoding salt: %w", err)
+	}
+
+	sk, err := decrypt(config.PrivKey, password, salt)
+	if err != nil {
+		return "", fmt.Errorf("error decrypting private key: %w", err)
+	}
+
+	return sk, nil
+}
+
+func publishEventToRelays(relays []string, ev nostr.Event) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	for _, url := range relays {
+		relay, err := nostr.RelayConnect(ctx, url)
+		if err != nil {
+			fmt.Printf("Failed to connect to %s: %v\n", url, err)
+			continue
+		}
+
+		err = relay.Publish(ctx, ev)
+		if err != nil {
+			fmt.Printf("Failed to publish to %s: %v\n", url, err)
+		} else {
+			fmt.Printf("Published to %s\n", url)
+		}
+		relay.Close()
+	}
 }
 
 func readPassword(prompt string) (string, error) {
@@ -236,35 +313,15 @@ func runSetup() {
 }
 
 func runPublish(message string) {
-	configPath := getConfigPath()
-	configData, err := os.ReadFile(configPath)
+	config, err := loadConfig()
 	if err != nil {
-		fmt.Println("Error reading config:", err)
+		fmt.Println(err)
 		return
 	}
 
-	var config Config
-	err = json.Unmarshal(configData, &config)
+	sk, err := decryptPrivateKeyFromConfig(config)
 	if err != nil {
-		fmt.Println("Error parsing config:", err)
-		return
-	}
-
-	password, err := readPassword("Enter password to decrypt private key: ")
-	if err != nil {
-		fmt.Println("Error reading password:", err)
-		return
-	}
-
-	salt, err := hex.DecodeString(config.Salt)
-	if err != nil {
-		fmt.Println("Error decoding salt:", err)
-		return
-	}
-
-	sk, err := decrypt(config.PrivKey, password, salt)
-	if err != nil {
-		fmt.Println("Error decrypting private key:", err)
+		fmt.Println(err)
 		return
 	}
 
@@ -278,22 +335,187 @@ func runPublish(message string) {
 
 	ev.Sign(sk)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	publishEventToRelays(config.Relays, ev)
+}
 
-	for _, url := range config.Relays {
-		relay, err := nostr.RelayConnect(ctx, url)
-		if err != nil {
-			fmt.Printf("Failed to connect to %s: %v\n", url, err)
+func runArticlePost(args []string) {
+	flagSet := flag.NewFlagSet("article post", flag.ContinueOnError)
+	title := flagSet.String("title", "", "Title for the article")
+	summary := flagSet.String("summary", "", "Short summary of the article")
+	image := flagSet.String("image", "", "URL to an image representing the article")
+	publishedAt := flagSet.String("published-at", "", "Published at timestamp")
+	identifierFlag := flagSet.String("identifier", "", "Stable identifier for this article (used for the d tag)")
+	flagSet.Usage = func() {
+		fmt.Println("Usage: nostr article post [--title <title>] [--summary <summary>] [--image <url>] [--published-at <time>] [--identifier <id>] <file>")
+	}
+
+	if err := flagSet.Parse(args); err != nil {
+		return
+	}
+
+	remaining := flagSet.Args()
+	if len(remaining) != 1 {
+		fmt.Println("Error: you must specify a file containing the article content.")
+		flagSet.Usage()
+		return
+	}
+
+	filePath := remaining[0]
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		fmt.Printf("Error reading article file: %v\n", err)
+		return
+	}
+
+	articleBody := string(content)
+	inferred := inferArticleMetadata(articleBody)
+
+	config, err := loadConfig()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	sk, err := decryptPrivateKeyFromConfig(config)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	identifier := deriveArticleIdentifier(filePath, *identifierFlag)
+
+	ev := nostr.Event{
+		PubKey:    config.PublicKey,
+		CreatedAt: nostr.Now(),
+		Kind:      30023,
+		Content:   articleBody,
+		Tags:      nostr.Tags{{"d", identifier}},
+	}
+
+	effectiveTitle := strings.TrimSpace(*title)
+	if effectiveTitle == "" {
+		effectiveTitle = inferred.Title
+	}
+	if effectiveTitle == "" {
+		base := filepath.Base(filePath)
+		effectiveTitle = strings.TrimSpace(strings.TrimSuffix(base, filepath.Ext(base)))
+	}
+	if effectiveTitle == "" {
+		effectiveTitle = identifier
+	}
+	if effectiveTitle != "" {
+		ev.Tags = append(ev.Tags, nostr.Tag{"title", effectiveTitle})
+	}
+
+	effectiveSummary := strings.TrimSpace(*summary)
+	if effectiveSummary == "" {
+		effectiveSummary = inferred.Summary
+	}
+	if effectiveSummary != "" {
+		ev.Tags = append(ev.Tags, nostr.Tag{"summary", effectiveSummary})
+	}
+
+	if *image != "" {
+		ev.Tags = append(ev.Tags, nostr.Tag{"image", *image})
+	}
+	publishedAtValue := strings.TrimSpace(*publishedAt)
+	if publishedAtValue == "" {
+		publishedAtValue = fmt.Sprintf("%d", ev.CreatedAt)
+	}
+	ev.Tags = append(ev.Tags, nostr.Tag{"published_at", publishedAtValue})
+
+	for _, relay := range config.Relays {
+		relay = strings.TrimSpace(relay)
+		if relay == "" {
 			continue
 		}
-
-		err = relay.Publish(ctx, ev)
-		if err != nil {
-			fmt.Printf("Failed to publish to %s: %v\n", url, err)
-		} else {
-			fmt.Printf("Published to %s\n", url)
-		}
-		relay.Close()
+		ev.Tags = append(ev.Tags, nostr.Tag{"r", relay})
 	}
+
+	ev.Sign(sk)
+
+	publishEventToRelays(config.Relays, ev)
+}
+
+type articleMetadata struct {
+	Title   string
+	Summary string
+}
+
+func inferArticleMetadata(content string) articleMetadata {
+	lines := strings.Split(content, "\n")
+	metadata := articleMetadata{}
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "#") {
+			metadata.Title = strings.TrimSpace(strings.TrimLeft(trimmed, "#"))
+			break
+		}
+	}
+
+	var summaryLines []string
+	collecting := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			if collecting {
+				break
+			}
+			continue
+		}
+		if strings.HasPrefix(trimmed, "#") {
+			if collecting {
+				break
+			}
+			continue
+		}
+		summaryLines = append(summaryLines, trimmed)
+		collecting = true
+	}
+
+	metadata.Summary = strings.Join(summaryLines, " ")
+	return metadata
+}
+
+func deriveArticleIdentifier(filePath, provided string) string {
+	if provided != "" {
+		return provided
+	}
+
+	base := filepath.Base(filePath)
+	name := strings.TrimSuffix(base, filepath.Ext(base))
+	slug := slugifyIdentifier(name)
+	if slug == "" {
+		slug = slugifyIdentifier(base)
+	}
+	if slug == "" {
+		hash := sha256.Sum256([]byte(filePath))
+		return fmt.Sprintf("article-%x", hash[:4])
+	}
+
+	return slug
+}
+
+func slugifyIdentifier(input string) string {
+	input = strings.ToLower(strings.TrimSpace(input))
+	var b strings.Builder
+	lastHyphen := false
+	for _, r := range input {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
+			b.WriteRune(r)
+			lastHyphen = false
+		case r == ' ' || r == '_' || r == '-':
+			if !lastHyphen && b.Len() > 0 {
+				b.WriteRune('-')
+				lastHyphen = true
+			}
+		}
+	}
+
+	return strings.Trim(b.String(), "-")
 }
