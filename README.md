@@ -14,5 +14,5 @@ Use `nostr note "This is a note of Kind 1"` to send the note to your relays.
 Use `nostr article path/to/article.md` to publish a long-form NIP-23 article. Flags such as `--title`, `--summary`, `--image`, `--published-at`, and `--identifier` are available for metadata overrides.
 
 ## Supported NIPs
-- NIP-10 Text Notes
+- NIP-01 Text Notes
 - NIP-23 Long Form Content 
