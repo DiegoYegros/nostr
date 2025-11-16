@@ -1,4 +1,4 @@
-# Nostr on CLI.
+# Nostr on the CLI.
 
 Have all your configs in a single config.json.
 

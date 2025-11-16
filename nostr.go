@@ -42,7 +42,6 @@ func main() {
 	case command == "--help":
 		printUsage()
 	default:
-		// Treat any other input as a message to publish
 		runPublish(command)
 	}
 }
@@ -142,53 +141,44 @@ func nsecToHex(nsec string) (string, error) {
 		return "", fmt.Errorf("invalid nsec format: %v", err)
 	}
 
-	// Verify the human-readable prefix is "nsec"
 	if hrp != "nsec" {
 		return "", fmt.Errorf("invalid prefix: expected nsec, got %s", hrp)
 	}
 
-	// Convert from 5-bit to 8-bit
 	converted, err := bech32.ConvertBits(data, 5, 8, false)
 	if err != nil {
 		return "", fmt.Errorf("failed to convert bits: %v", err)
 	}
 
-	// Convert the byte slice to hex string
 	return hex.EncodeToString(converted), nil
 }
 
 func runSetup() {
-	// Create config directory if it doesn't exist
 	configPath := getConfigPath()
 	os.MkdirAll(filepath.Dir(configPath), 0700)
 
-	// Get private key from user
 	fmt.Print("Enter your private key (nsec format): ")
 	var nsec string
 	fmt.Scanln(&nsec)
 
-	// Convert nsec to hex format
 	sk, err := nsecToHex(nsec)
 	if err != nil {
 		fmt.Println("Error:", err)
 		return
 	}
 
-	// Validate private key format and derive public key
 	pk, err := nostr.GetPublicKey(sk)
 	if err != nil {
 		fmt.Println("Error: Invalid private key")
 		return
 	}
 
-	// Get password for encryption
 	password, err := readPassword("Enter password to encrypt private key: ")
 	if err != nil {
 		fmt.Println("Error reading password:", err)
 		return
 	}
 
-	// Confirm password
 	confirmPassword, err := readPassword("Confirm password: ")
 	if err != nil {
 		fmt.Println("Error reading password:", err)
@@ -200,31 +190,26 @@ func runSetup() {
 		return
 	}
 
-	// Generate random salt
 	salt := make([]byte, 16)
 	if _, err := io.ReadFull(rand.Reader, salt); err != nil {
 		fmt.Println("Error generating salt:", err)
 		return
 	}
 
-	// Encrypt private key
 	encryptedKey, err := encrypt([]byte(sk), password, salt)
 	if err != nil {
 		fmt.Println("Error encrypting private key:", err)
 		return
 	}
 
-	// Check if config file exists and load it
 	var config Config
 
-	// Default relays if we need to create a new config
 	defaultRelays := []string{
 		"wss://relay.damus.io",
 		"wss://relay.primal.net",
 		"wss://nos.lol",
 	}
 
-	// Try to read existing config
 	if configData, err := os.ReadFile(configPath); err == nil {
 		// Config exists, parse it
 		if err := json.Unmarshal(configData, &config); err != nil {
@@ -232,17 +217,14 @@ func runSetup() {
 			return
 		}
 	} else {
-		// Config doesn't exist, create directory and use default relays
 		os.MkdirAll(filepath.Dir(configPath), 0700)
 		config.Relays = defaultRelays
 	}
 
-	// Update only the key-related fields
 	config.PrivKey = encryptedKey
 	config.Salt = hex.EncodeToString(salt)
 	config.PublicKey = pk
 
-	// Save config
 	configJson, _ := json.MarshalIndent(config, "", "  ")
 	err = os.WriteFile(configPath, configJson, 0600)
 	if err != nil {
@@ -254,7 +236,6 @@ func runSetup() {
 }
 
 func runPublish(message string) {
-	// Read config
 	configPath := getConfigPath()
 	configData, err := os.ReadFile(configPath)
 	if err != nil {
@@ -269,14 +250,12 @@ func runPublish(message string) {
 		return
 	}
 
-	// Get password to decrypt private key
 	password, err := readPassword("Enter password to decrypt private key: ")
 	if err != nil {
 		fmt.Println("Error reading password:", err)
 		return
 	}
 
-	// Decrypt private key
 	salt, err := hex.DecodeString(config.Salt)
 	if err != nil {
 		fmt.Println("Error decoding salt:", err)
@@ -289,7 +268,6 @@ func runPublish(message string) {
 		return
 	}
 
-	// Create event
 	ev := nostr.Event{
 		PubKey:    config.PublicKey,
 		CreatedAt: nostr.Now(),
@@ -298,14 +276,11 @@ func runPublish(message string) {
 		Content:   message,
 	}
 
-	// Sign event
 	ev.Sign(sk)
 
-	// Create context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Publish to all relays
 	for _, url := range config.Relays {
 		relay, err := nostr.RelayConnect(ctx, url)
 		if err != nil {
