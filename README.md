@@ -1,4 +1,4 @@
-# Nostr on the CLI.
+# Nostr on the CLI
 
 Have all your configs in a single config.json.
 
@@ -15,6 +15,6 @@ Use `nostr relays list` to inspect the relays stored in your config, `nostr rela
 
 Use `nostr article path/to/article.md` to publish a long-form NIP-23 article. Flags such as `--title`, `--summary`, `--image`, `--published-at`, and `--identifier` are available for metadata overrides.
 
-## Supported NIPs:
-- NIP-10 Text Notes
+## Supported NIPs
+- NIP-01 Text Notes
 - NIP-23 Long Form Content 
