@@ -34,4 +34,5 @@ func init() {
 	rootCmd.AddCommand(pubkeyCmd)
 	rootCmd.AddCommand(whoamiCmd)
 	rootCmd.AddCommand(profileCmd)
+	rootCmd.AddCommand(getProfileCmd)
 }

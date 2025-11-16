@@ -3,6 +3,7 @@ package nip00
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	nostrlib "github.com/nbd-wtf/go-nostr"
 
@@ -35,4 +36,32 @@ func PublishProfile(ctx context.Context, cfg *nostrkeys.Config, sk string, profi
 
 	relay.PublishToRelays(ctx, cfg.Relays, ev)
 	return nil
+}
+
+func FetchProfile(ctx context.Context, relays []string, pubKey string) (*ProfileMetadata, error) {
+	if pubKey == "" {
+		return nil, errors.New("a public key is required")
+	}
+
+	for _, url := range relays {
+		relay, err := nostrlib.RelayConnect(ctx, url)
+		if err != nil {
+			continue
+		}
+
+		events, err := relay.QuerySync(ctx, nostrlib.Filter{Kinds: []int{0}, Authors: []string{pubKey}, Limit: 1})
+		relay.Close()
+		if err != nil || len(events) == 0 {
+			continue
+		}
+
+		var profile ProfileMetadata
+		if err := json.Unmarshal([]byte(events[0].Content), &profile); err != nil {
+			continue
+		}
+
+		return &profile, nil
+	}
+
+	return nil, errors.New("profile not found on configured relays")
 }
