@@ -9,6 +9,6 @@ This includes:
 
 Use `nostr setup` to introduce your key. You will be asked a password to decrypt it.
 
-Use `nostr "This is a note of Kind 1"` to send the note to your relays.
+Use `nostr note "This is a note of Kind 1"` to send the note to your relays.
 
-Use `nostr article post path/to/article.md` to publish a long-form NIP-23 article. Flags such as `--title`, `--summary`, `--image`, `--published-at`, and `--identifier` are available for metadata overrides.
+Use `nostr article path/to/article.md` to publish a long-form NIP-23 article. Flags such as `--title`, `--summary`, `--image`, `--published-at`, and `--identifier` are available for metadata overrides.

@@ -9,6 +9,7 @@ import (
 var setupCmd = &cobra.Command{
 	Use:   "setup",
 	Short: "Configure your encrypted keys and relays",
+	Long:  "Walk through an interactive prompt to generate or import your key, encrypt it, and set up relays.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return nostrkeys.RunSetup()
 	},

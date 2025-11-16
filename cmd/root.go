@@ -1,49 +1,32 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
-	"strings"
+	"os"
 
 	"github.com/spf13/cobra"
-
-	"nostr-cli/nips/nip01"
-	nostrkeys "nostr-cli/nostr"
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "nostr [message]",
-	Short: "Nostr CLI",
-	Long:  "A CLI client for Nostr.",
-	Args:  cobra.ArbitraryArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if len(args) == 0 {
-			return cmd.Help()
-		}
-
-		cfg, err := nostrkeys.LoadConfig()
-		if err != nil {
-			return err
-		}
-
-		sk, err := nostrkeys.PromptForDecryptedKey(cfg)
-		if err != nil {
-			return err
-		}
-
-		message := strings.Join(args, " ")
-		ctx := context.Background()
-		return nip01.PublishNote(ctx, cfg, sk, message)
+	Use:   "nostr",
+	Short: "Nostr CLI toolkit",
+	Long:  "A friendly CLI for managing your keys, relays, short notes, and NIP-23 articles.",
+	Run: func(cmd *cobra.Command, args []string) {
+		_ = cmd.Help()
+		fmt.Println()
+		fmt.Println("Try \"nostr setup\" to configure your keys or \"nostr note \"hello\"\" to publish a message.")
 	},
 }
 
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Println(err)
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
 	}
 }
 
 func init() {
 	rootCmd.AddCommand(setupCmd)
+	rootCmd.AddCommand(noteCmd)
 	rootCmd.AddCommand(articleCmd)
 }

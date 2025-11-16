@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -18,15 +20,15 @@ var (
 )
 
 var articleCmd = &cobra.Command{
-	Use:   "article",
-	Short: "NIP-23 long-form article utilities",
-}
-
-var articlePostCmd = &cobra.Command{
-	Use:   "post <file>",
+	Use:   "article <file>",
 	Short: "Publish a long-form article (NIP-23)",
-	Args:  cobra.ExactArgs(1),
+	Long:  strings.TrimSpace(`Compose and publish a Markdown file as a NIP-23 article with optional metadata overrides.`),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			_ = cmd.Help()
+			return fmt.Errorf("a path to the article Markdown file is required")
+		}
+
 		cfg, err := nostrkeys.LoadConfig()
 		if err != nil {
 			return err
@@ -51,11 +53,9 @@ var articlePostCmd = &cobra.Command{
 }
 
 func init() {
-	articleCmd.AddCommand(articlePostCmd)
-
-	articlePostCmd.Flags().StringVar(&articleTitle, "title", "", "Article title")
-	articlePostCmd.Flags().StringVar(&articleSummary, "summary", "", "Article summary")
-	articlePostCmd.Flags().StringVar(&articleImage, "image", "", "Image URL")
-	articlePostCmd.Flags().StringVar(&articlePublished, "published-at", "", "Published-at timestamp")
-	articlePostCmd.Flags().StringVar(&articleIdentifier, "identifier", "", "Stable identifier for the d tag")
+	articleCmd.Flags().StringVar(&articleTitle, "title", "", "Override the article title")
+	articleCmd.Flags().StringVar(&articleSummary, "summary", "", "Override the summary blurb")
+	articleCmd.Flags().StringVar(&articleImage, "image", "", "Set the preview image URL")
+	articleCmd.Flags().StringVar(&articlePublished, "published-at", "", "Custom published-at timestamp")
+	articleCmd.Flags().StringVar(&articleIdentifier, "identifier", "", "Stable identifier for the d tag")
 }
