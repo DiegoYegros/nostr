@@ -1,4 +1,5 @@
 # Nostr on the CLI
+<img width="1382" height="513" alt="image" src="https://github.com/user-attachments/assets/2d452362-95e8-42a3-814b-1934244fed24" />
 
 Have all your configs in a single config.json.
 
