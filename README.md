@@ -11,6 +11,8 @@ Use `nostr setup` to introduce your key. You will be asked a password to decrypt
 
 Use `nostr note "This is a note of Kind 1"` to send the note to your relays.
 
+Use `nostr relays list` to inspect the relays stored in your config, `nostr relays add <url>` or `nostr relays remove <url>` to edit the list, and `nostr relays pull` to synchronize it from your NIP-65 outbox metadata.
+
 Use `nostr article path/to/article.md` to publish a long-form NIP-23 article. Flags such as `--title`, `--summary`, `--image`, `--published-at`, and `--identifier` are available for metadata overrides.
 
 ## Supported NIPs:

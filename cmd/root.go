@@ -29,4 +29,5 @@ func init() {
 	rootCmd.AddCommand(setupCmd)
 	rootCmd.AddCommand(noteCmd)
 	rootCmd.AddCommand(articleCmd)
+	rootCmd.AddCommand(relaysCmd)
 }

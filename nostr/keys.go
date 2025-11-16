@@ -34,6 +34,10 @@ var defaultRelays = []string{
 	"wss://nos.lol",
 }
 
+func DefaultRelays() []string {
+	return append([]string{}, defaultRelays...)
+}
+
 func GetConfigPath() string {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
