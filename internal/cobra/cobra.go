@@ -37,18 +37,18 @@ func (c *Command) Execute() error {
 }
 
 func (c *Command) execute(args []string) error {
-	if len(args) > 0 {
-		if child := c.findSubcommand(args[0]); child != nil {
-			return child.execute(args[1:])
-		}
-	}
-
 	if c.flags != nil {
 		c.flags.SetOutput(io.Discard)
 		if err := c.flags.Parse(args); err != nil {
 			return err
 		}
 		args = c.flags.Args()
+	}
+
+	if len(args) > 0 {
+		if child := c.findSubcommand(args[0]); child != nil {
+			return child.execute(args[1:])
+		}
 	}
 
 	if c.Args != nil {

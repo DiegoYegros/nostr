@@ -23,21 +23,26 @@ var whoamiCmd = &cobra.Command{
 	RunE:  runShowPublicKey,
 }
 
+func init() {
+	registerProfileFlag(pubkeyCmd)
+	registerProfileFlag(whoamiCmd)
+}
+
 func runShowPublicKey(cmd *cobra.Command, args []string) error {
-	cfg, err := nostrkeys.LoadConfig()
+	_, profile, alias, err := loadProfileForCommand()
 	if err != nil {
 		return err
 	}
-	if cfg.PublicKey == "" {
+	if profile.PublicKey == "" {
 		return errors.New("no public key found; run 'nostr setup' first")
 	}
 
-	npub, err := nostrkeys.HexToNpub(cfg.PublicKey)
+	npub, err := nostrkeys.HexToNpub(profile.PublicKey)
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("Public key (hex):  %s\n", cfg.PublicKey)
-	fmt.Printf("Public key (npub): %s\n", npub)
+	fmt.Printf("[%s] Public key (hex):  %s\n", alias, profile.PublicKey)
+	fmt.Printf("[%s] Public key (npub): %s\n", alias, npub)
 	return nil
 }

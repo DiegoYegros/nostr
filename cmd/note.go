@@ -12,27 +12,40 @@ import (
 )
 
 var noteCmd = &cobra.Command{
-	Use:   "note <message>",
+	Use:   "note [message]",
 	Short: "Publish a short note (NIP-01)",
-	Long:  "Send a Kind 1 Nostr note to every relay configured in your config.json file.",
+	Long:  "Send a Kind 1 Nostr note to your configured relays using arguments or piped stdin.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if len(args) == 0 {
+		message := strings.TrimSpace(strings.Join(args, " "))
+		if message == "" {
+			input, ok, err := readInputFromStdin()
+			if err != nil {
+				return err
+			}
+			if ok {
+				message = strings.TrimSpace(input)
+			}
+		}
+		if message == "" {
 			_ = cmd.Help()
 			return fmt.Errorf("a note message is required")
 		}
 
-		cfg, err := nostrkeys.LoadConfig()
+		_, profile, _, err := loadProfileForCommand()
 		if err != nil {
 			return err
 		}
 
-		sk, err := nostrkeys.PromptForDecryptedKey(cfg)
+		sk, err := nostrkeys.PromptForDecryptedKey(profile)
 		if err != nil {
 			return err
 		}
 
-		message := strings.Join(args, " ")
 		ctx := context.Background()
-		return nip01.PublishNote(ctx, cfg, sk, message)
+		return nip01.PublishNote(ctx, profile, sk, message)
 	},
+}
+
+func init() {
+	registerProfileFlag(noteCmd)
 }

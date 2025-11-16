@@ -17,28 +17,36 @@ import (
 )
 
 type PublishOptions struct {
-	FilePath    string
-	Title       string
-	Summary     string
-	Image       string
-	PublishedAt string
-	Identifier  string
+	FilePath      string
+	InlineContent string
+	Title         string
+	Summary       string
+	Image         string
+	PublishedAt   string
+	Identifier    string
 }
 
-func PublishArticle(ctx context.Context, cfg *nostrkeys.Config, sk string, opts PublishOptions) error {
-	content, err := os.ReadFile(opts.FilePath)
-	if err != nil {
-		return fmt.Errorf("reading article file: %w", err)
+func PublishArticle(ctx context.Context, profile *nostrkeys.Profile, sk string, opts PublishOptions) error {
+	var body string
+	switch {
+	case strings.TrimSpace(opts.FilePath) != "":
+		content, err := os.ReadFile(opts.FilePath)
+		if err != nil {
+			return fmt.Errorf("reading article file: %w", err)
+		}
+		body = strings.TrimPrefix(string(content), "\ufeff")
+	case opts.InlineContent != "":
+		body = strings.TrimPrefix(opts.InlineContent, "\ufeff")
+	default:
+		return fmt.Errorf("article content is required")
 	}
-
-	body := strings.TrimPrefix(string(content), "\ufeff")
 	frontMatter, strippedBody := extractFrontMatter(body)
 	body = strippedBody
 	inferred := inferArticleMetadata(body)
-	identifier := deriveArticleIdentifier(opts.FilePath, fallbackValue(opts.Identifier, frontMatter.Identifier))
+	identifier := deriveArticleIdentifier(opts.FilePath, fallbackValue(opts.Identifier, frontMatter.Identifier), body)
 
 	ev := nostrlib.Event{
-		PubKey:    cfg.PublicKey,
+		PubKey:    profile.PublicKey,
 		CreatedAt: nostrlib.Now(),
 		Kind:      30023,
 		Content:   body,
@@ -74,7 +82,7 @@ func PublishArticle(ctx context.Context, cfg *nostrkeys.Config, sk string, opts 
 	}
 	ev.Tags = append(ev.Tags, nostrlib.Tag{"published_at", publishedAt})
 
-	for _, relayURL := range cfg.Relays {
+	for _, relayURL := range profile.Relays {
 		relayURL = strings.TrimSpace(relayURL)
 		if relayURL == "" {
 			continue
@@ -86,7 +94,7 @@ func PublishArticle(ctx context.Context, cfg *nostrkeys.Config, sk string, opts 
 		return err
 	}
 
-	relay.PublishToRelays(ctx, cfg.Relays, ev)
+	relay.PublishToRelays(ctx, profile.Relays, ev)
 	return nil
 }
 
@@ -298,9 +306,19 @@ func inferArticleMetadata(content string) articleMetadata {
 	return metadata
 }
 
-func deriveArticleIdentifier(filePath, provided string) string {
+func deriveArticleIdentifier(filePath, provided, content string) string {
 	if provided != "" {
 		return provided
+	}
+
+	if strings.TrimSpace(filePath) == "" {
+		trimmed := strings.TrimSpace(content)
+		if trimmed != "" {
+			hash := sha256.Sum256([]byte(trimmed))
+			return fmt.Sprintf("article-%x", hash[:4])
+		}
+		hash := sha256.Sum256([]byte(strconv.FormatInt(time.Now().UnixNano(), 10)))
+		return fmt.Sprintf("article-%x", hash[:4])
 	}
 
 	base := filepath.Base(filePath)
@@ -318,7 +336,14 @@ func deriveArticleIdentifier(filePath, provided string) string {
 }
 
 func identifierFromPath(filePath string) string {
-	base := filepath.Base(filePath)
+	trimmed := strings.TrimSpace(filePath)
+	if trimmed == "" || trimmed == "." {
+		return ""
+	}
+	base := filepath.Base(trimmed)
+	if base == "" || base == "." {
+		return ""
+	}
 	return strings.TrimSpace(strings.TrimSuffix(base, filepath.Ext(base)))
 }
 

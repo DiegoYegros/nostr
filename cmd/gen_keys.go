@@ -8,6 +8,8 @@ import (
 	nostrkeys "nostr-cli/nostr"
 )
 
+var genKeysAlias string
+
 var genKeysCmd = &cobra.Command{
 	Use:   "gen-keys",
 	Short: "Generate a new private/public key pair",
@@ -35,6 +37,10 @@ var genKeysCmd = &cobra.Command{
 		fmt.Printf("  Public (npub): %s\n", npub)
 		fmt.Println()
 		fmt.Println("Continuing with setup to encrypt and save your new keys...")
-		return nostrkeys.RunSetupWithKey(sk)
+		return nostrkeys.RunSetupWithKey(genKeysAlias, sk)
 	},
+}
+
+func init() {
+	genKeysCmd.Flags().StringVar(&genKeysAlias, "alias", "default", "Profile alias to store the generated key")
 }

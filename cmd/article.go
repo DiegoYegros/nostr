@@ -20,35 +20,49 @@ var (
 )
 
 var articleCmd = &cobra.Command{
-	Use:   "article <file>",
+	Use:   "article [file]",
 	Short: "Publish a long-form article (NIP-23)",
-	Long:  strings.TrimSpace(`Compose and publish a Markdown file as a NIP-23 article with optional metadata overrides.`),
+	Long:  strings.TrimSpace(`Compose and publish Markdown as a NIP-23 article from a file or piped stdin with optional metadata overrides.`),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if len(args) == 0 {
-			_ = cmd.Help()
-			return fmt.Errorf("a path to the article Markdown file is required")
+		var filePath string
+		if len(args) > 0 && args[0] != "-" {
+			filePath = args[0]
 		}
 
-		cfg, err := nostrkeys.LoadConfig()
+		var inline string
+		if filePath == "" {
+			input, ok, err := readInputFromStdin()
+			if err != nil {
+				return err
+			}
+			if !ok {
+				_ = cmd.Help()
+				return fmt.Errorf("provide a Markdown file path or pipe content into the command")
+			}
+			inline = input
+		}
+
+		_, profile, _, err := loadProfileForCommand()
 		if err != nil {
 			return err
 		}
 
-		sk, err := nostrkeys.PromptForDecryptedKey(cfg)
+		sk, err := nostrkeys.PromptForDecryptedKey(profile)
 		if err != nil {
 			return err
 		}
 
 		opts := nip23.PublishOptions{
-			FilePath:    args[0],
-			Title:       articleTitle,
-			Summary:     articleSummary,
-			Image:       articleImage,
-			PublishedAt: articlePublished,
-			Identifier:  articleIdentifier,
+			FilePath:      filePath,
+			InlineContent: inline,
+			Title:         articleTitle,
+			Summary:       articleSummary,
+			Image:         articleImage,
+			PublishedAt:   articlePublished,
+			Identifier:    articleIdentifier,
 		}
 
-		return nip23.PublishArticle(context.Background(), cfg, sk, opts)
+		return nip23.PublishArticle(context.Background(), profile, sk, opts)
 	},
 }
 
@@ -58,4 +72,5 @@ func init() {
 	articleCmd.Flags().StringVar(&articleImage, "image", "", "Set the preview image URL")
 	articleCmd.Flags().StringVar(&articlePublished, "published-at", "", "Custom published-at timestamp")
 	articleCmd.Flags().StringVar(&articleIdentifier, "identifier", "", "Stable identifier for the d tag")
+	registerProfileFlag(articleCmd)
 }

@@ -14,9 +14,11 @@ var rootCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		_ = cmd.Help()
 		fmt.Println()
-		fmt.Println("Try \"nostr setup\" to configure your keys or \"nostr note \"hello\"\" to publish a message.")
+		fmt.Println("Try \"nostr setup --alias personal\" to configure keys or \"nostr --profile work note \"hello\"\" to publish a message.")
 	},
 }
+
+var profileOverride string
 
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
@@ -35,4 +37,6 @@ func init() {
 	rootCmd.AddCommand(whoamiCmd)
 	rootCmd.AddCommand(profileCmd)
 	rootCmd.AddCommand(getProfileCmd)
+	rootCmd.AddCommand(profileManagerCmd)
+	registerProfileFlag(rootCmd)
 }

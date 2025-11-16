@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 
@@ -22,10 +23,112 @@ import (
 )
 
 type Config struct {
+	CurrentProfile string              `json:"current_profile"`
+	Profiles       map[string]*Profile `json:"profiles"`
+}
+
+type Profile struct {
 	Relays    []string `json:"relays"`
 	PrivKey   string   `json:"encrypted_private_key"`
 	Salt      string   `json:"salt"`
 	PublicKey string   `json:"public_key"`
+}
+
+type legacyConfig struct {
+	Relays    []string `json:"relays"`
+	PrivKey   string   `json:"encrypted_private_key"`
+	Salt      string   `json:"salt"`
+	PublicKey string   `json:"public_key"`
+}
+
+func NewConfig() *Config {
+	return &Config{Profiles: make(map[string]*Profile)}
+}
+
+func (cfg *Config) ensureProfiles() {
+	if cfg.Profiles == nil {
+		cfg.Profiles = make(map[string]*Profile)
+	}
+}
+
+func (cfg *Config) ensureCurrentProfile() error {
+	cfg.ensureProfiles()
+	if len(cfg.Profiles) == 0 {
+		return errors.New("no profiles configured; run 'nostr setup' first")
+	}
+	if cfg.CurrentProfile != "" {
+		if _, ok := cfg.Profiles[cfg.CurrentProfile]; ok {
+			return nil
+		}
+	}
+	aliases := cfg.ProfileAliases()
+	if len(aliases) == 0 {
+		return errors.New("no profiles configured; run 'nostr setup' first")
+	}
+	cfg.CurrentProfile = aliases[0]
+	return nil
+}
+
+func (cfg *Config) ProfileAliases() []string {
+	cfg.ensureProfiles()
+	var aliases []string
+	for alias := range cfg.Profiles {
+		aliases = append(aliases, alias)
+	}
+	sort.Strings(aliases)
+	return aliases
+}
+
+func (cfg *Config) ActiveProfile(aliasOverride string) (*Profile, string, error) {
+	cfg.ensureProfiles()
+	if len(cfg.Profiles) == 0 {
+		return nil, "", errors.New("no profiles configured; run 'nostr setup' first")
+	}
+	target := strings.TrimSpace(aliasOverride)
+	if target == "" {
+		target = cfg.CurrentProfile
+	}
+	if target != "" {
+		if profile, ok := cfg.Profiles[target]; ok {
+			return profile, target, nil
+		}
+		return nil, "", fmt.Errorf("profile '%s' not found", target)
+	}
+	aliases := cfg.ProfileAliases()
+	if len(aliases) == 0 {
+		return nil, "", errors.New("no profiles configured; run 'nostr setup' first")
+	}
+	cfg.CurrentProfile = aliases[0]
+	return cfg.Profiles[aliases[0]], cfg.CurrentProfile, nil
+}
+
+func (cfg *Config) SetCurrentProfile(alias string) error {
+	cfg.ensureProfiles()
+	trimmed := strings.TrimSpace(alias)
+	if trimmed == "" {
+		return errors.New("profile alias cannot be empty")
+	}
+	if _, ok := cfg.Profiles[trimmed]; !ok {
+		return fmt.Errorf("profile '%s' not found", trimmed)
+	}
+	cfg.CurrentProfile = trimmed
+	return nil
+}
+
+func convertLegacyConfig(input legacyConfig) *Config {
+	cfg := NewConfig()
+	profile := &Profile{
+		Relays:    append([]string{}, input.Relays...),
+		PrivKey:   input.PrivKey,
+		Salt:      input.Salt,
+		PublicKey: input.PublicKey,
+	}
+	if len(profile.Relays) == 0 {
+		profile.Relays = DefaultRelays()
+	}
+	cfg.Profiles["default"] = profile
+	cfg.CurrentProfile = "default"
+	return cfg
 }
 
 var defaultRelays = []string{
@@ -53,18 +156,46 @@ func LoadConfig() (*Config, error) {
 		return nil, fmt.Errorf("reading config: %w", err)
 	}
 
-	var config Config
-	if err := json.Unmarshal(configData, &config); err != nil {
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(configData, &probe); err != nil {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 
-	return &config, nil
+	if _, ok := probe["profiles"]; ok {
+		var cfg Config
+		if err := json.Unmarshal(configData, &cfg); err != nil {
+			return nil, fmt.Errorf("parsing config: %w", err)
+		}
+		if err := cfg.ensureCurrentProfile(); err != nil {
+			return nil, err
+		}
+		return &cfg, nil
+	}
+
+	var legacy legacyConfig
+	if err := json.Unmarshal(configData, &legacy); err != nil {
+		return nil, fmt.Errorf("parsing legacy config: %w", err)
+	}
+	if legacy.PrivKey == "" || legacy.Salt == "" || legacy.PublicKey == "" {
+		return nil, errors.New("config missing profile data; run 'nostr setup' again")
+	}
+	converted := convertLegacyConfig(legacy)
+	if err := SaveConfig(converted); err != nil {
+		return nil, err
+	}
+	return converted, nil
 }
 
 func SaveConfig(cfg *Config) error {
 	configPath := GetConfigPath()
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
 		return err
+	}
+	cfg.ensureProfiles()
+	if len(cfg.Profiles) > 0 && cfg.CurrentProfile == "" {
+		if err := cfg.ensureCurrentProfile(); err != nil {
+			return err
+		}
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -73,21 +204,24 @@ func SaveConfig(cfg *Config) error {
 	return os.WriteFile(configPath, data, 0o600)
 }
 
-func PromptForDecryptedKey(cfg *Config) (string, error) {
+func PromptForDecryptedKey(profile *Profile) (string, error) {
 	password, err := readPassword("Enter password to decrypt private key: ")
 	if err != nil {
 		return "", fmt.Errorf("reading password: %w", err)
 	}
 
-	salt, err := hex.DecodeString(cfg.Salt)
+	salt, err := hex.DecodeString(profile.Salt)
 	if err != nil {
 		return "", fmt.Errorf("decoding salt: %w", err)
 	}
 
-	return decrypt(cfg.PrivKey, password, salt)
+	return decrypt(profile.PrivKey, password, salt)
 }
 
-func RunSetup() error {
+func RunSetup(alias string) error {
+	if strings.TrimSpace(alias) == "" {
+		alias = "default"
+	}
 	configPath := GetConfigPath()
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
 		return err
@@ -104,7 +238,7 @@ func RunSetup() error {
 		return err
 	}
 
-	return RunSetupWithKey(sk)
+	return RunSetupWithKey(alias, sk)
 }
 
 func nsecToHex(nsec string) (string, error) {
@@ -134,7 +268,7 @@ func readPassword(prompt string) (string, error) {
 	return string(bytePassword), nil
 }
 
-func RunSetupWithKey(sk string) error {
+func RunSetupWithKey(alias, sk string) error {
 	pk, err := nostrlib.GetPublicKey(sk)
 	if err != nil {
 		return errors.New("invalid private key provided")
@@ -162,22 +296,39 @@ func RunSetupWithKey(sk string) error {
 		return err
 	}
 
-	cfg := &Config{
-		Relays:    defaultRelays,
+	if strings.TrimSpace(alias) == "" {
+		alias = "default"
+	}
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		cfg = NewConfig()
+	}
+
+	cfg.ensureProfiles()
+	relays := DefaultRelays()
+	if existing, ok := cfg.Profiles[alias]; ok && len(existing.Relays) > 0 {
+		relays = append([]string{}, existing.Relays...)
+	}
+
+	profile := &Profile{
+		Relays:    relays,
 		PrivKey:   encryptedKey,
 		Salt:      hex.EncodeToString(salt),
 		PublicKey: pk,
 	}
 
-	if existing, err := LoadConfig(); err == nil {
-		cfg.Relays = existing.Relays
-	}
+	cfg.Profiles[alias] = profile
+	cfg.CurrentProfile = alias
 
 	if err := SaveConfig(cfg); err != nil {
 		return err
 	}
 
-	fmt.Println("Setup complete! Your public key is:", pk)
+	fmt.Printf("Setup complete for '%s'! Your public key is: %s\n", alias, pk)
 	return nil
 }
 

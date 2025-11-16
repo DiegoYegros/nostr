@@ -23,15 +23,15 @@ var relaysListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "Print configured relays",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := nostrkeys.LoadConfig()
+		_, profile, alias, err := loadProfileForCommand()
 		if err != nil {
 			return err
 		}
-		if len(cfg.Relays) == 0 {
-			fmt.Println("No relays are configured. Use 'nostr relays add <url>' to add one.")
+		if len(profile.Relays) == 0 {
+			fmt.Printf("No relays are configured for '%s'. Use 'nostr relays add <url>' to add one.\n", alias)
 			return nil
 		}
-		for i, relay := range cfg.Relays {
+		for i, relay := range profile.Relays {
 			fmt.Printf("%d. %s\n", i+1, strings.TrimSpace(relay))
 		}
 		return nil
@@ -46,11 +46,11 @@ var relaysAddCmd = &cobra.Command{
 			_ = cmd.Help()
 			return fmt.Errorf("at least one relay URL is required")
 		}
-		cfg, err := nostrkeys.LoadConfig()
+		cfg, profile, alias, err := loadProfileForCommand()
 		if err != nil {
 			return err
 		}
-		added := addRelaysToConfig(cfg, args)
+		added := addRelaysToProfile(profile, args)
 		if len(added) == 0 {
 			fmt.Println("All provided relays are already configured.")
 			return nil
@@ -58,7 +58,7 @@ var relaysAddCmd = &cobra.Command{
 		if err := nostrkeys.SaveConfig(cfg); err != nil {
 			return err
 		}
-		fmt.Printf("Added %d relay(s):\n", len(added))
+		fmt.Printf("Added %d relay(s) to '%s':\n", len(added), alias)
 		for _, relay := range added {
 			fmt.Printf("- %s\n", relay)
 		}
@@ -74,18 +74,18 @@ var relaysRemoveCmd = &cobra.Command{
 			_ = cmd.Help()
 			return fmt.Errorf("at least one relay URL is required")
 		}
-		cfg, err := nostrkeys.LoadConfig()
+		cfg, profile, alias, err := loadProfileForCommand()
 		if err != nil {
 			return err
 		}
-		removed, missing := removeRelaysFromConfig(cfg, args)
+		removed, missing := removeRelaysFromProfile(profile, args)
 		if len(removed) == 0 {
 			return fmt.Errorf("none of the provided relays were configured")
 		}
 		if err := nostrkeys.SaveConfig(cfg); err != nil {
 			return err
 		}
-		fmt.Printf("Removed %d relay(s):\n", len(removed))
+		fmt.Printf("Removed %d relay(s) from '%s':\n", len(removed), alias)
 		for _, relay := range removed {
 			fmt.Printf("- %s\n", relay)
 		}
@@ -101,16 +101,16 @@ var relaysPullCmd = &cobra.Command{
 	Short: "Pull relay metadata via the outbox model",
 	Long:  "Connect to configured relays, fetch the latest kind 10002 event, and update the local relay list.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := nostrkeys.LoadConfig()
+		cfg, profile, alias, err := loadProfileForCommand()
 		if err != nil {
 			return err
 		}
-		pubKey := strings.TrimSpace(cfg.PublicKey)
+		pubKey := strings.TrimSpace(profile.PublicKey)
 		if pubKey == "" {
 			return errors.New("no public key found in config; run 'nostr setup' first")
 		}
 
-		queryRelays := cfg.Relays
+		queryRelays := profile.Relays
 		if len(queryRelays) == 0 {
 			queryRelays = nostrkeys.DefaultRelays()
 		}
@@ -125,11 +125,11 @@ var relaysPullCmd = &cobra.Command{
 			return errors.New("no writable relays were advertised by your outbox")
 		}
 
-		cfg.Relays = fetched
+		profile.Relays = fetched
 		if err := nostrkeys.SaveConfig(cfg); err != nil {
 			return err
 		}
-		fmt.Printf("Synchronized %d relay(s) from outbox metadata:\n", len(fetched))
+		fmt.Printf("Synchronized %d relay(s) into '%s' from outbox metadata:\n", len(fetched), alias)
 		for _, relay := range fetched {
 			fmt.Printf("- %s\n", relay)
 		}
@@ -142,11 +142,16 @@ func init() {
 	relaysCmd.AddCommand(relaysAddCmd)
 	relaysCmd.AddCommand(relaysRemoveCmd)
 	relaysCmd.AddCommand(relaysPullCmd)
+	registerProfileFlag(relaysCmd)
+	registerProfileFlag(relaysListCmd)
+	registerProfileFlag(relaysAddCmd)
+	registerProfileFlag(relaysRemoveCmd)
+	registerProfileFlag(relaysPullCmd)
 }
 
-func addRelaysToConfig(cfg *nostrkeys.Config, relays []string) []string {
+func addRelaysToProfile(profile *nostrkeys.Profile, relays []string) []string {
 	existing := make(map[string]struct{})
-	for _, relay := range cfg.Relays {
+	for _, relay := range profile.Relays {
 		key := normalizedRelayKey(relay)
 		if key == "" {
 			continue
@@ -168,13 +173,13 @@ func addRelaysToConfig(cfg *nostrkeys.Config, relays []string) []string {
 			continue
 		}
 		existing[key] = struct{}{}
-		cfg.Relays = append(cfg.Relays, trimmed)
+		profile.Relays = append(profile.Relays, trimmed)
 		added = append(added, trimmed)
 	}
 	return added
 }
 
-func removeRelaysFromConfig(cfg *nostrkeys.Config, targets []string) (removed []string, missing []string) {
+func removeRelaysFromProfile(profile *nostrkeys.Profile, targets []string) (removed []string, missing []string) {
 	targetMap := make(map[string]string)
 	for _, relay := range targets {
 		trimmed := cleanRelayURL(relay)
@@ -189,7 +194,7 @@ func removeRelaysFromConfig(cfg *nostrkeys.Config, targets []string) (removed []
 	}
 
 	var remaining []string
-	for _, relay := range cfg.Relays {
+	for _, relay := range profile.Relays {
 		key := normalizedRelayKey(relay)
 		if _, ok := targetMap[key]; ok {
 			removed = append(removed, relay)
@@ -198,7 +203,7 @@ func removeRelaysFromConfig(cfg *nostrkeys.Config, targets []string) (removed []
 		}
 		remaining = append(remaining, relay)
 	}
-	cfg.Relays = remaining
+	profile.Relays = remaining
 
 	for _, relay := range targetMap {
 		missing = append(missing, relay)

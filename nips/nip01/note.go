@@ -9,9 +9,9 @@ import (
 	nostrkeys "nostr-cli/nostr"
 )
 
-func PublishNote(ctx context.Context, cfg *nostrkeys.Config, sk, message string) error {
+func PublishNote(ctx context.Context, profile *nostrkeys.Profile, sk, message string) error {
 	ev := nostrlib.Event{
-		PubKey:    cfg.PublicKey,
+		PubKey:    profile.PublicKey,
 		CreatedAt: nostrlib.Now(),
 		Kind:      1,
 		Content:   message,
@@ -21,6 +21,6 @@ func PublishNote(ctx context.Context, cfg *nostrkeys.Config, sk, message string)
 		return err
 	}
 
-	relay.PublishToRelays(ctx, cfg.Relays, ev)
+	relay.PublishToRelays(ctx, profile.Relays, ev)
 	return nil
 }

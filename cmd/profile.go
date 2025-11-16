@@ -28,12 +28,12 @@ var profileCmd = &cobra.Command{
 			return errors.New("provide at least one of --name, --about, or --picture")
 		}
 
-		cfg, err := nostrkeys.LoadConfig()
+		_, activeProfile, _, err := loadProfileForCommand()
 		if err != nil {
 			return err
 		}
 
-		sk, err := nostrkeys.PromptForDecryptedKey(cfg)
+		sk, err := nostrkeys.PromptForDecryptedKey(activeProfile)
 		if err != nil {
 			return err
 		}
@@ -45,7 +45,7 @@ var profileCmd = &cobra.Command{
 		}
 
 		if profileName == "" || profileAbout == "" || profilePicture == "" {
-			existing, err := nip00.FetchProfile(context.Background(), cfg.Relays, cfg.PublicKey)
+			existing, err := nip00.FetchProfile(context.Background(), activeProfile.Relays, activeProfile.PublicKey)
 			if err == nil && existing != nil {
 				if metadata.Name == "" {
 					metadata.Name = existing.Name
@@ -59,7 +59,7 @@ var profileCmd = &cobra.Command{
 			}
 		}
 
-		return nip00.PublishProfile(context.Background(), cfg, sk, metadata)
+		return nip00.PublishProfile(context.Background(), activeProfile, sk, metadata)
 	},
 }
 
@@ -68,17 +68,17 @@ var getProfileCmd = &cobra.Command{
 	Short: "Show Kind 0 profile metadata",
 	Long:  "Fetch the latest metadata (Kind 0) event for your account or another public key from your configured relays.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := nostrkeys.LoadConfig()
+		_, activeProfile, _, err := loadProfileForCommand()
 		if err != nil {
 			return err
 		}
 
 		pubKey := getProfilePubKey
 		if pubKey == "" {
-			pubKey = cfg.PublicKey
+			pubKey = activeProfile.PublicKey
 		}
 
-		profile, err := nip00.FetchProfile(context.Background(), cfg.Relays, pubKey)
+		profile, err := nip00.FetchProfile(context.Background(), activeProfile.Relays, pubKey)
 		if err != nil {
 			return err
 		}
@@ -103,4 +103,6 @@ func init() {
 	profileCmd.Flags().StringVar(&profileAbout, "about", "", "Short bio or description")
 	profileCmd.Flags().StringVar(&profilePicture, "picture", "", "Profile picture URL")
 	getProfileCmd.Flags().StringVar(&getProfilePubKey, "pubkey", "", "Hex public key to inspect (defaults to your configured key)")
+	registerProfileFlag(profileCmd)
+	registerProfileFlag(getProfileCmd)
 }

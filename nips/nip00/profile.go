@@ -17,14 +17,14 @@ type ProfileMetadata struct {
 	Picture string `json:"picture,omitempty"`
 }
 
-func PublishProfile(ctx context.Context, cfg *nostrkeys.Config, sk string, profile ProfileMetadata) error {
+func PublishProfile(ctx context.Context, activeProfile *nostrkeys.Profile, sk string, profile ProfileMetadata) error {
 	content, err := json.Marshal(profile)
 	if err != nil {
 		return err
 	}
 
 	ev := nostrlib.Event{
-		PubKey:    cfg.PublicKey,
+		PubKey:    activeProfile.PublicKey,
 		CreatedAt: nostrlib.Now(),
 		Kind:      0,
 		Content:   string(content),
@@ -34,7 +34,7 @@ func PublishProfile(ctx context.Context, cfg *nostrkeys.Config, sk string, profi
 		return err
 	}
 
-	relay.PublishToRelays(ctx, cfg.Relays, ev)
+	relay.PublishToRelays(ctx, activeProfile.Relays, ev)
 	return nil
 }
 
