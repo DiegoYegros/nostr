@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	nostrlib "github.com/nbd-wtf/go-nostr"
 
@@ -29,9 +31,11 @@ func PublishArticle(ctx context.Context, cfg *nostrkeys.Config, sk string, opts 
 		return fmt.Errorf("reading article file: %w", err)
 	}
 
-	body := string(content)
+	body := strings.TrimPrefix(string(content), "\ufeff")
+	frontMatter, strippedBody := extractFrontMatter(body)
+	body = strippedBody
 	inferred := inferArticleMetadata(body)
-	identifier := deriveArticleIdentifier(opts.FilePath, opts.Identifier)
+	identifier := deriveArticleIdentifier(opts.FilePath, fallbackValue(opts.Identifier, frontMatter.Identifier))
 
 	ev := nostrlib.Event{
 		PubKey:    cfg.PublicKey,
@@ -41,21 +45,30 @@ func PublishArticle(ctx context.Context, cfg *nostrkeys.Config, sk string, opts 
 		Tags:      nostrlib.Tags{{"d", identifier}},
 	}
 
-	effectiveTitle := fallbackValue(opts.Title, inferred.Title, identifierFromPath(opts.FilePath), identifier)
+	effectiveTitle := fallbackValue(opts.Title, frontMatter.Title, inferred.Title, identifierFromPath(opts.FilePath), identifier)
 	if effectiveTitle != "" {
 		ev.Tags = append(ev.Tags, nostrlib.Tag{"title", effectiveTitle})
 	}
 
-	effectiveSummary := fallbackValue(opts.Summary, inferred.Summary)
+	effectiveSummary := fallbackValue(opts.Summary, frontMatter.Summary, inferred.Summary)
 	if effectiveSummary != "" {
 		ev.Tags = append(ev.Tags, nostrlib.Tag{"summary", effectiveSummary})
 	}
 
-	if opts.Image != "" {
-		ev.Tags = append(ev.Tags, nostrlib.Tag{"image", opts.Image})
+	effectiveImage := fallbackValue(opts.Image, frontMatter.Image)
+	if effectiveImage != "" {
+		ev.Tags = append(ev.Tags, nostrlib.Tag{"image", effectiveImage})
 	}
 
 	publishedAt := strings.TrimSpace(opts.PublishedAt)
+	if publishedAt == "" {
+		publishedAt = strings.TrimSpace(frontMatter.PublishedAt)
+	}
+	if publishedAt == "" {
+		if normalized, ok := normalizeFrontMatterDate(frontMatter.Date); ok {
+			publishedAt = normalized
+		}
+	}
 	if publishedAt == "" {
 		publishedAt = fmt.Sprintf("%d", ev.CreatedAt)
 	}
@@ -88,8 +101,162 @@ func fallbackValue(values ...string) string {
 }
 
 type articleMetadata struct {
-	Title   string
-	Summary string
+	Title       string
+	Summary     string
+	Image       string
+	PublishedAt string
+	Date        string
+	Identifier  string
+}
+
+func extractFrontMatter(content string) (articleMetadata, string) {
+	metadata := articleMetadata{}
+	lines := strings.Split(content, "\n")
+	firstMarker := -1
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if trimmed == "---" {
+			firstMarker = i
+		}
+		break
+	}
+	if firstMarker == -1 {
+		return metadata, content
+	}
+	secondMarker := -1
+	for i := firstMarker + 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "---" {
+			secondMarker = i
+			break
+		}
+	}
+	if secondMarker == -1 {
+		return metadata, content
+	}
+	block := strings.Join(lines[firstMarker+1:secondMarker], "\n")
+	metadata = parseFrontMatterBlock(block)
+	remaining := append([]string{}, lines[:firstMarker]...)
+	remaining = append(remaining, lines[secondMarker+1:]...)
+	cleaned := strings.Join(remaining, "\n")
+	cleaned = strings.TrimLeft(cleaned, "\r\n")
+	return metadata, cleaned
+}
+
+func parseFrontMatterBlock(block string) articleMetadata {
+	metadata := articleMetadata{}
+	lines := strings.Split(block, "\n")
+	var currentKey string
+	collecting := false
+	var buffer []string
+
+	flush := func() {
+		if !collecting {
+			return
+		}
+		value := strings.Join(buffer, "\n")
+		value = strings.TrimSpace(value)
+		applyMetadataValue(&metadata, currentKey, value)
+		currentKey = ""
+		buffer = nil
+		collecting = false
+	}
+
+	for i := 0; i < len(lines); {
+		line := strings.TrimRight(lines[i], "\r")
+		trimmed := strings.TrimSpace(line)
+		if collecting {
+			if trimmed == "" {
+				buffer = append(buffer, "")
+				i++
+				continue
+			}
+			if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") {
+				buffer = append(buffer, strings.TrimLeft(line, " \t"))
+				i++
+				continue
+			}
+			flush()
+			continue
+		}
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			i++
+			continue
+		}
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			i++
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(parts[0]))
+		value := strings.TrimSpace(parts[1])
+		if value == "|" || value == ">" {
+			collecting = true
+			currentKey = key
+			buffer = buffer[:0]
+			i++
+			continue
+		}
+		applyMetadataValue(&metadata, key, trimQuotedValue(value))
+		i++
+	}
+	if collecting {
+		flush()
+	}
+	return metadata
+}
+
+func trimQuotedValue(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) >= 2 {
+		if (strings.HasPrefix(value, "\"") && strings.HasSuffix(value, "\"")) || (strings.HasPrefix(value, "'") && strings.HasSuffix(value, "'")) {
+			return value[1 : len(value)-1]
+		}
+	}
+	return value
+}
+
+func applyMetadataValue(metadata *articleMetadata, key, value string) {
+	switch key {
+	case "title":
+		metadata.Title = value
+	case "summary":
+		metadata.Summary = value
+	case "image":
+		metadata.Image = value
+	case "published-at":
+		metadata.PublishedAt = value
+	case "date":
+		metadata.Date = value
+	case "identifier":
+		metadata.Identifier = value
+	}
+}
+
+func normalizeFrontMatterDate(value string) (string, bool) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", false
+	}
+	layouts := []string{
+		time.RFC3339,
+		time.RFC3339Nano,
+		"2006-01-02 15:04:05 -0700",
+		"2006-01-02 15:04:05 -07:00",
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	}
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, trimmed); err == nil {
+			return fmt.Sprintf("%d", t.Unix()), true
+		}
+	}
+	if unix, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
+		return fmt.Sprintf("%d", unix), true
+	}
+	return "", false
 }
 
 func inferArticleMetadata(content string) articleMetadata {
