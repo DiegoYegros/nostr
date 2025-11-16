@@ -30,4 +30,8 @@ func init() {
 	rootCmd.AddCommand(noteCmd)
 	rootCmd.AddCommand(articleCmd)
 	rootCmd.AddCommand(relaysCmd)
+	rootCmd.AddCommand(genKeysCmd)
+	rootCmd.AddCommand(pubkeyCmd)
+	rootCmd.AddCommand(whoamiCmd)
+	rootCmd.AddCommand(profileCmd)
 }

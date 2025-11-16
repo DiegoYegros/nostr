@@ -104,6 +104,37 @@ func RunSetup() error {
 		return err
 	}
 
+	return RunSetupWithKey(sk)
+}
+
+func nsecToHex(nsec string) (string, error) {
+	hrp, data, err := bech32.Decode(nsec)
+	if err != nil {
+		return "", fmt.Errorf("invalid nsec format: %v", err)
+	}
+	if hrp != "nsec" {
+		return "", fmt.Errorf("invalid prefix: expected nsec, got %s", hrp)
+	}
+
+	converted, err := bech32.ConvertBits(data, 5, 8, false)
+	if err != nil {
+		return "", fmt.Errorf("failed to convert bits: %v", err)
+	}
+
+	return hex.EncodeToString(converted), nil
+}
+
+func readPassword(prompt string) (string, error) {
+	fmt.Print(prompt)
+	bytePassword, err := term.ReadPassword(int(syscall.Stdin))
+	fmt.Println()
+	if err != nil {
+		return "", err
+	}
+	return string(bytePassword), nil
+}
+
+func RunSetupWithKey(sk string) error {
 	pk, err := nostrlib.GetPublicKey(sk)
 	if err != nil {
 		return errors.New("invalid private key provided")
@@ -150,31 +181,35 @@ func RunSetup() error {
 	return nil
 }
 
-func nsecToHex(nsec string) (string, error) {
-	hrp, data, err := bech32.Decode(nsec)
+func GenerateKeyPair() (string, string, error) {
+	sk := nostrlib.GeneratePrivateKey()
+	pk, err := nostrlib.GetPublicKey(sk)
 	if err != nil {
-		return "", fmt.Errorf("invalid nsec format: %v", err)
+		return "", "", err
 	}
-	if hrp != "nsec" {
-		return "", fmt.Errorf("invalid prefix: expected nsec, got %s", hrp)
-	}
-
-	converted, err := bech32.ConvertBits(data, 5, 8, false)
-	if err != nil {
-		return "", fmt.Errorf("failed to convert bits: %v", err)
-	}
-
-	return hex.EncodeToString(converted), nil
+	return sk, pk, nil
 }
 
-func readPassword(prompt string) (string, error) {
-	fmt.Print(prompt)
-	bytePassword, err := term.ReadPassword(int(syscall.Stdin))
-	fmt.Println()
+func HexToNsec(sk string) (string, error) {
+	return hexToBech32("nsec", sk)
+}
+
+func HexToNpub(pk string) (string, error) {
+	return hexToBech32("npub", pk)
+}
+
+func hexToBech32(hrp, input string) (string, error) {
+	decoded, err := hex.DecodeString(strings.TrimSpace(input))
 	if err != nil {
 		return "", err
 	}
-	return string(bytePassword), nil
+
+	converted, err := bech32.ConvertBits(decoded, 8, 5, true)
+	if err != nil {
+		return "", err
+	}
+
+	return bech32.Encode(hrp, converted)
 }
 
 func deriveKey(password string, salt []byte) []byte {
